@@ -23,6 +23,7 @@ type Config struct {
 	APIKey       string   `json:"api_key"`
 	UploadDir    string   `json:"upload_dir"`
 	Port         string   `json:"port"`
+	Domain       string   `json:"domain"`
 	AllowedTypes []string `json:"allowed_types"`
 }
 
@@ -58,6 +59,9 @@ func loadConfig() error {
 	}
 	if config.Port == "" {
 		config.Port = ":8080" // Default port
+	}
+	if config.Domain == "" {
+		return fmt.Errorf("domain cannot be empty")
 	}
 
 	// Set default allowed types if not specified
@@ -169,8 +173,8 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate download URL
-	downloadURL := fmt.Sprintf("/download/%s", randomFilename)
+	// Generate download URL with domain
+	downloadURL := fmt.Sprintf("https://%s/download/%s", config.Domain, randomFilename)
 	sendJSONResponse(w, true, "File uploaded successfully", downloadURL)
 }
 

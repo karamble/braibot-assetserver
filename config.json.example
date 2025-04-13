@@ -3,6 +3,7 @@
     "api_key": "your-secret-api-key-here",
     "upload_dir": "./uploads",
     "port": ":8080",
+    "domain": "assets.example.com",
     "allowed_types": [
         "image/jpeg",
         "image/png",
