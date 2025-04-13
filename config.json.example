@@ -1,0 +1,18 @@
+{
+    "max_file_size": 10485760,
+    "api_key": "your-secret-api-key-here",
+    "upload_dir": "./uploads",
+    "port": ":8080",
+    "allowed_types": [
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp",
+        "image/svg+xml",
+        "audio/mpeg",
+        "audio/ogg",
+        "audio/wav",
+        "audio/webm",
+        "audio/aac"
+    ]
+} 
