@@ -225,6 +225,23 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
+func testHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check API key
+	apiKeyHeader := r.Header.Get("X-API-Key")
+	if apiKeyHeader != config.APIKey {
+		sendJSONResponse(w, false, "Invalid API key", "")
+		return
+	}
+
+	// If we get here, the API key is valid
+	sendJSONResponse(w, true, "API key is valid", "")
+}
+
 func sendJSONResponse(w http.ResponseWriter, success bool, message string, url string) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(Response{
@@ -237,6 +254,7 @@ func sendJSONResponse(w http.ResponseWriter, success bool, message string, url s
 func main() {
 	http.HandleFunc("/upload", uploadHandler)
 	http.HandleFunc("/download/", downloadHandler)
+	http.HandleFunc("/test", testHandler)
 
 	fmt.Printf("Server starting on port %s...\n", config.Port)
 	if err := http.ListenAndServe(config.Port, nil); err != nil {
