@@ -77,6 +77,8 @@ func loadConfig() error {
 			"image/svg+xml",
 			// Generic image type pattern
 			"image/*",
+			// Binary data (for compatibility)
+			"application/octet-stream",
 			// Audio
 			"audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/aac",
 		}
@@ -236,6 +238,24 @@ func handleMultipartUpload(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Detected content type from file data: %s\n", contentType)
 	}
 
+	// Special handling for application/octet-stream
+	if contentType == "application/octet-stream" {
+		// Try to detect if it's actually an image based on file signatures
+		if len(fileData) > 3 {
+			// JPEG signature: FF D8 FF
+			if fileData[0] == 0xFF && fileData[1] == 0xD8 && fileData[2] == 0xFF {
+				contentType = "image/jpeg"
+				fmt.Printf("Overriding MIME type to image/jpeg based on file signature\n")
+			}
+			// PNG signature: 89 50 4E 47
+			if len(fileData) > 4 && fileData[0] == 0x89 && fileData[1] == 0x50 &&
+				fileData[2] == 0x4E && fileData[3] == 0x47 {
+				contentType = "image/png"
+				fmt.Printf("Overriding MIME type to image/png based on file signature\n")
+			}
+		}
+	}
+
 	// Check file type
 	if !isAllowedFileType(contentType) {
 		fmt.Printf("File type not allowed: %s\n", contentType)
@@ -307,6 +327,25 @@ func handleFormUrlEncodedUpload(w http.ResponseWriter, r *http.Request) {
 	// If file type is not specified, detect it
 	if fileType == "" {
 		fileType = http.DetectContentType(fileData)
+		fmt.Printf("Detected content type from file data: %s\n", fileType)
+	}
+
+	// Special handling for application/octet-stream
+	if fileType == "application/octet-stream" {
+		// Try to detect if it's actually an image based on file signatures
+		if len(fileData) > 3 {
+			// JPEG signature: FF D8 FF
+			if fileData[0] == 0xFF && fileData[1] == 0xD8 && fileData[2] == 0xFF {
+				fileType = "image/jpeg"
+				fmt.Printf("Overriding MIME type to image/jpeg based on file signature\n")
+			}
+			// PNG signature: 89 50 4E 47
+			if len(fileData) > 4 && fileData[0] == 0x89 && fileData[1] == 0x50 &&
+				fileData[2] == 0x4E && fileData[3] == 0x47 {
+				fileType = "image/png"
+				fmt.Printf("Overriding MIME type to image/png based on file signature\n")
+			}
+		}
 	}
 
 	// Check file type
