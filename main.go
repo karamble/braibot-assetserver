@@ -69,7 +69,15 @@ func loadConfig() error {
 	// Set default allowed types if not specified
 	if len(config.AllowedTypes) == 0 {
 		config.AllowedTypes = []string{
-			"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml",
+			// Images
+			"image/jpeg", "image/jpg", "image/pjpeg",
+			"image/png",
+			"image/gif",
+			"image/webp",
+			"image/svg+xml",
+			// Generic image type pattern
+			"image/*",
+			// Audio
 			"audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/aac",
 		}
 	}
@@ -105,11 +113,37 @@ func generateRandomFilename(originalFilename string) (string, error) {
 }
 
 func isAllowedFileType(contentType string) bool {
+	fmt.Printf("Checking if content type is allowed: %s\n", contentType)
+	fmt.Printf("Allowed types: %v\n", config.AllowedTypes)
+
+	// Convert to lowercase for case-insensitive comparison
+	contentTypeLower := strings.ToLower(contentType)
+
 	for _, allowedType := range config.AllowedTypes {
-		if contentType == allowedType {
+		// Convert allowed type to lowercase as well
+		allowedTypeLower := strings.ToLower(allowedType)
+
+		if contentTypeLower == allowedTypeLower {
+			fmt.Printf("Content type %s is allowed\n", contentType)
 			return true
 		}
 	}
+
+	// Also check if it's a more generic match (e.g., image/*)
+	for _, allowedType := range config.AllowedTypes {
+		allowedTypeLower := strings.ToLower(allowedType)
+
+		// Check if it's a wildcard type (e.g., image/*)
+		if strings.HasSuffix(allowedTypeLower, "/*") {
+			prefix := strings.TrimSuffix(allowedTypeLower, "/*")
+			if strings.HasPrefix(contentTypeLower, prefix) {
+				fmt.Printf("Content type %s is allowed via wildcard %s\n", contentType, allowedType)
+				return true
+			}
+		}
+	}
+
+	fmt.Printf("Content type %s is NOT allowed\n", contentType)
 	return false
 }
 
@@ -188,6 +222,18 @@ func handleMultipartUpload(w http.ResponseWriter, r *http.Request) {
 	contentType := header.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = r.Header.Get("X-File-Type")
+	}
+
+	// If still empty, check if a filetype field was provided in the form
+	if contentType == "" {
+		contentType = r.FormValue("filetype")
+		fmt.Printf("Using filetype from form field: %s\n", contentType)
+	}
+
+	// If still empty, try to detect from the file data
+	if contentType == "" {
+		contentType = http.DetectContentType(fileData)
+		fmt.Printf("Detected content type from file data: %s\n", contentType)
 	}
 
 	// Check file type
