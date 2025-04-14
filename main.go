@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -28,9 +29,10 @@ type Config struct {
 }
 
 type Response struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	URL     string `json:"url,omitempty"`
+	Success     bool   `json:"success"`
+	Message     string `json:"message"`
+	URL         string `json:"url,omitempty"`
+	MaxFileSize int64  `json:"max_file_size,omitempty"`
 }
 
 var config Config
@@ -124,11 +126,32 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check content type
+	contentType := r.Header.Get("Content-Type")
+	isMultipart := strings.HasPrefix(contentType, "multipart/form-data")
+	isFormUrlEncoded := contentType == "application/x-www-form-urlencoded"
+
+	// Print debug info
+	fmt.Printf("Upload request received: Content-Type=%s, Content-Length=%d\n",
+		contentType, r.ContentLength)
+
+	// Handle based on content type
+	if isMultipart {
+		handleMultipartUpload(w, r)
+	} else if isFormUrlEncoded {
+		handleFormUrlEncodedUpload(w, r)
+	} else {
+		sendJSONResponse(w, false, "Unsupported content type", "")
+	}
+}
+
+func handleMultipartUpload(w http.ResponseWriter, r *http.Request) {
 	// Limit request body size
 	r.Body = http.MaxBytesReader(w, r.Body, config.MaxFileSize)
 
 	// Parse multipart form
 	if err := r.ParseMultipartForm(config.MaxFileSize); err != nil {
+		fmt.Printf("Error parsing multipart form: %v\n", err)
 		sendJSONResponse(w, false, "File too large", "")
 		return
 	}
@@ -137,14 +160,39 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	// Get file from form
 	file, header, err := r.FormFile("file")
 	if err != nil {
+		fmt.Printf("Error retrieving file from form: %v\n", err)
 		sendJSONResponse(w, false, "Error retrieving file", "")
 		return
 	}
 	defer file.Close()
 
-	// Check file type
+	// Check file size
+	// This is a more direct check of actual file size
+	fileData, err := io.ReadAll(file)
+	if err != nil {
+		fmt.Printf("Error reading file data: %v\n", err)
+		sendJSONResponse(w, false, "Error reading file", "")
+		return
+	}
+
+	if int64(len(fileData)) > config.MaxFileSize {
+		fmt.Printf("File too large: %d bytes (max: %d)\n", len(fileData), config.MaxFileSize)
+		sendJSONResponse(w, false, "File too large", "")
+		return
+	}
+
+	// We'll reuse file with fileData
+	fileReader := bytes.NewReader(fileData)
+
+	// Get content type from header or from X-File-Type header
 	contentType := header.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = r.Header.Get("X-File-Type")
+	}
+
+	// Check file type
 	if !isAllowedFileType(contentType) {
+		fmt.Printf("File type not allowed: %s\n", contentType)
 		sendJSONResponse(w, false, "File type not allowed", "")
 		return
 	}
@@ -156,26 +204,108 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save file and generate URL
+	downloadURL, err := saveFileAndGenerateURL(randomFilename, fileReader)
+	if err != nil {
+		sendJSONResponse(w, false, fmt.Sprintf("Error saving file: %v", err), "")
+		return
+	}
+
+	sendJSONResponse(w, true, "File uploaded successfully", downloadURL)
+}
+
+func handleFormUrlEncodedUpload(w http.ResponseWriter, r *http.Request) {
+	// Parse form
+	if err := r.ParseForm(); err != nil {
+		fmt.Printf("Error parsing form: %v\n", err)
+		sendJSONResponse(w, false, "Error parsing form", "")
+		return
+	}
+
+	// Get form data
+	filename := r.FormValue("filename")
+	if filename == "" {
+		filename = "file.dat"
+	}
+
+	fileType := r.FormValue("type")
+	if fileType == "" {
+		fileType = r.Header.Get("X-File-Type")
+	}
+
+	base64Data := r.FormValue("data")
+	if base64Data == "" {
+		sendJSONResponse(w, false, "No file data provided", "")
+		return
+	}
+
+	// Print debug info
+	fmt.Printf("Form data received: filename=%s, type=%s, data length=%d\n",
+		filename, fileType, len(base64Data))
+
+	// Decode base64 data
+	fileData, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		fmt.Printf("Error decoding base64 data: %v\n", err)
+		sendJSONResponse(w, false, "Error decoding base64 data", "")
+		return
+	}
+
+	// Check file size
+	if int64(len(fileData)) > config.MaxFileSize {
+		fmt.Printf("File too large: %d bytes (max: %d)\n", len(fileData), config.MaxFileSize)
+		sendJSONResponse(w, false, "File too large", "")
+		return
+	}
+
+	// If file type is not specified, detect it
+	if fileType == "" {
+		fileType = http.DetectContentType(fileData)
+	}
+
+	// Check file type
+	if !isAllowedFileType(fileType) {
+		fmt.Printf("File type not allowed: %s\n", fileType)
+		sendJSONResponse(w, false, "File type not allowed", "")
+		return
+	}
+
+	// Generate random filename
+	randomFilename, err := generateRandomFilename(filename)
+	if err != nil {
+		sendJSONResponse(w, false, "Error generating filename", "")
+		return
+	}
+
+	// Save file and generate URL
+	downloadURL, err := saveFileAndGenerateURL(randomFilename, bytes.NewReader(fileData))
+	if err != nil {
+		sendJSONResponse(w, false, fmt.Sprintf("Error saving file: %v", err), "")
+		return
+	}
+
+	sendJSONResponse(w, true, "File uploaded successfully", downloadURL)
+}
+
+func saveFileAndGenerateURL(filename string, data io.Reader) (string, error) {
 	// Create file path
-	filepath := filepath.Join(config.UploadDir, randomFilename)
+	filepath := filepath.Join(config.UploadDir, filename)
 
 	// Create new file
 	dst, err := os.Create(filepath)
 	if err != nil {
-		sendJSONResponse(w, false, "Error creating file", "")
-		return
+		return "", err
 	}
 	defer dst.Close()
 
 	// Copy file contents
-	if _, err := io.Copy(dst, file); err != nil {
-		sendJSONResponse(w, false, "Error saving file", "")
-		return
+	if _, err := io.Copy(dst, data); err != nil {
+		return "", err
 	}
 
 	// Generate download URL with domain
-	downloadURL := fmt.Sprintf("https://%s/download/%s", config.Domain, randomFilename)
-	sendJSONResponse(w, true, "File uploaded successfully", downloadURL)
+	downloadURL := fmt.Sprintf("https://%s/download/%s", config.Domain, filename)
+	return downloadURL, nil
 }
 
 func downloadHandler(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +369,14 @@ func testHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If we get here, the API key is valid
-	sendJSONResponse(w, true, "API key is valid", "")
+	resp := Response{
+		Success:     true,
+		Message:     "API key is valid",
+		MaxFileSize: config.MaxFileSize,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func sendJSONResponse(w http.ResponseWriter, success bool, message string, url string) {
